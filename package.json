@@ -9,6 +9,7 @@
     "dotenv": "^16.0.1",
     "ethers": "^5.6.9",
     "hardhat-contract-sizer": "^2.6.1",
+    "moralis": "^1.11.0",
     "path": "^0.12.7"
   }
 }

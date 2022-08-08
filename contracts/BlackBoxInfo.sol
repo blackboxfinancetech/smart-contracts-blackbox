@@ -16,12 +16,6 @@ contract BlackBoxInfo is Ownable {
     address public blackBox;
     bool public isSetBlackBox;
 
-    event AddRound(
-        uint256 indexed roundIndex,
-        uint256 indexed roundId,
-        uint256 indexed deadline
-    );
-
     event AddPositionIndexBought(
         address indexed userAddress,
         uint256 indexed roundId

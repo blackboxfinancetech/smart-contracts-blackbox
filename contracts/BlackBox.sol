@@ -17,6 +17,7 @@ contract BlackBox is Ownable, ReentrancyGuard {
     }
     struct Position {
         address player;
+        uint256 roundIndex;
         uint256 roundId;
         uint256 side;
         uint256 amount;
@@ -47,11 +48,11 @@ contract BlackBox is Ownable, ReentrancyGuard {
     RoundDetail[] public roundDetails;
     Position[] public positions;
 
-    mapping(uint256 => uint256) public roundIdToRoundIndex;
+    mapping(uint256 => uint256) public roundIndexToRoundId;
     mapping(uint256 => uint256) public positionInRoundToCount;
     mapping(uint256 => uint256) public leftPositionInRoundToCount;
     mapping(uint256 => uint256) public rightPositionInRoundToCount;
-    mapping(uint256 => uint256) public roundIdToInitPositionIndex;
+    mapping(uint256 => uint256) public roundIndexToInitPositionIndex; //might be change
 
     event AddRound(
         uint256 indexed roundIndex,
@@ -77,6 +78,7 @@ contract BlackBox is Ownable, ReentrancyGuard {
 
     event UpdateReward(
         uint256 indexed roundId,
+        uint256 indexed roundIndex,
         uint256 totalFee,
         uint256 platformRewards,
         uint256 result
@@ -115,7 +117,7 @@ contract BlackBox is Ownable, ReentrancyGuard {
         );
         roundDetails.push(round);
         uint256 roundIndex = roundDetails.length - 1;
-        roundIdToRoundIndex[_roundId] = roundIndex;
+        roundIndexToRoundId[roundIndex] = _roundId;
         emit AddRound(roundIndex, _roundId, _deadline);
     }
 
@@ -158,17 +160,17 @@ contract BlackBox is Ownable, ReentrancyGuard {
     ) internal returns (uint256) {
         uint256 id = roundDetails[_roundIndex].roundId;
         uint256 positionStartIndex = positions.length; //Prob not accurate but the best index we can start loop with
-        positions.push(Position(_sender, id, _side, _totalAmount));
+        positions.push(Position(_sender, _roundIndex, id, _side, _totalAmount));
         uint256 positionIndex = positions.length - 1;
         blackBoxInfo.addPositionIndexBought(_sender, positionIndex);
-        if (positionInRoundToCount[id] == 0) {
-            roundIdToInitPositionIndex[id] = positionStartIndex;
+        if (positionInRoundToCount[_roundIndex] == 0) {
+            roundIndexToInitPositionIndex[_roundIndex] = positionStartIndex;
         } // adding earliest positionIndex of round
-        positionInRoundToCount[id]++;
+        positionInRoundToCount[_roundIndex]++;
         if (_side == 1) {
-            leftPositionInRoundToCount[id]++;
+            leftPositionInRoundToCount[_roundIndex]++;
         } else if (_side == 2) {
-            rightPositionInRoundToCount[id]++;
+            rightPositionInRoundToCount[_roundIndex]++;
         }
         emit AddPosition(
             _sender,
@@ -193,48 +195,41 @@ contract BlackBox is Ownable, ReentrancyGuard {
         feePercentage = _feePercentage;
     }
 
-    function setResult(uint256 _roundId, uint256 _result) public onlyOwner {
-        uint256 roundIndex = roundIdToRoundIndex[_roundId];
-        /*    require(
-            block.timestamp >= roundDetails[roundIndex].deadline,
-            "Not due time yet"
-        ); */
+    function setResult(uint256 _roundIndex, uint256 _result) public onlyOwner {
         require(
             _result == 1 || _result == 2 || _result == 3,
             "Incorrect result"
         );
 
-        roundDetails[roundIndex].result = _result;
+        roundDetails[_roundIndex].result = _result;
     }
 
     //dont check below here yet
-    function _updateRewardByRoundId(uint256 _roundId) internal {
+    function _updateRewardByRoundIndex(uint256 _roundIndex) internal {
         console.log("entering updateReward");
-        uint256 roundIndex = roundIdToRoundIndex[_roundId];
-        require(roundDetails[roundIndex].result != 0, "Result is not set.");
-        /* require(
-            roundDetails[roundIndex].deadline <= block.timestamp,
-            "Not due time yet."
-        ); */
+        uint256 roundId = roundIndexToRoundId[_roundIndex];
+        require(roundDetails[_roundIndex].result != 0, "Result is not set.");
         require(
-            roundDetails[roundIndex].roundStatus == STATUS.OPEN,
+            roundDetails[_roundIndex].roundStatus == STATUS.OPEN,
             "Status round is closed."
         );
-        uint256[] memory totalPositions = getPositionIndexesByRoundId(_roundId);
-        uint256[] memory leftPositions = getLeftPositionIndexesByRoundId(
-            _roundId
+        uint256[] memory totalPositions = getPositionIndexesByRoundIndex(
+            _roundIndex
         );
-        uint256[] memory rightPositions = getRightPositionIndexesByRoundId(
-            _roundId
+        uint256[] memory leftPositions = getLeftPositionIndexesByRoundIndex(
+            _roundIndex
         );
-        uint256 totalAmount = getTotalAmountByRoundId(_roundId);
-        uint256 leftAmount = getLeftAmountByRoundId(_roundId);
-        uint256 rightAmount = getRightAmountByRoundId(_roundId);
-        uint256 result = roundDetails[roundIndex].result;
+        uint256[] memory rightPositions = getRightPositionIndexesByRoundIndex(
+            _roundIndex
+        );
+        uint256 totalAmount = getTotalAmountByRoundIndex(_roundIndex);
+        uint256 leftAmount = getLeftAmountByRoundIndex(_roundIndex);
+        uint256 rightAmount = getRightAmountByRoundIndex(_roundIndex);
+        uint256 result = roundDetails[_roundIndex].result;
         // tie
         if (result == 3 || leftAmount == 0 || rightAmount == 0) {
             console.log("entering tie");
-            roundDetails[roundIndex].roundStatus = STATUS.CLOSED;
+            roundDetails[_roundIndex].roundStatus = STATUS.CLOSED;
             for (uint256 i = 0; i < totalPositions.length; i++) {
                 address player = positions[totalPositions[i]].player;
                 uint256 side = positions[totalPositions[i]].side;
@@ -249,7 +244,7 @@ contract BlackBox is Ownable, ReentrancyGuard {
                 emit UpdateRewardPerAddress(
                     player,
                     totalPositions[i],
-                    _roundId,
+                    roundId,
                     side,
                     positionAmount,
                     platformTokenRewardsPerPlayer
@@ -257,7 +252,8 @@ contract BlackBox is Ownable, ReentrancyGuard {
             }
             accuPlatformRewards += platformTokenRewardsPerRound;
             emit UpdateReward(
-                _roundId,
+                roundId,
+                _roundIndex,
                 0,
                 platformTokenRewardsPerRound,
                 result
@@ -275,7 +271,7 @@ contract BlackBox is Ownable, ReentrancyGuard {
             );
             feeToken.safeTransfer(address(feeSharingSystem), (totalFee));
             accuFee += totalFee;
-            roundDetails[roundIndex].roundStatus = STATUS.CLOSED;
+            roundDetails[_roundIndex].roundStatus = STATUS.CLOSED;
             for (uint256 i = 0; i < leftPositions.length; i++) {
                 address player = positions[leftPositions[i]].player;
                 uint256 side = positions[leftPositions[i]].side;
@@ -291,7 +287,7 @@ contract BlackBox is Ownable, ReentrancyGuard {
                 emit UpdateRewardPerAddress(
                     player,
                     leftPositions[i],
-                    _roundId,
+                    roundId,
                     side,
                     positionAmount + gainAmount,
                     0
@@ -311,7 +307,7 @@ contract BlackBox is Ownable, ReentrancyGuard {
                 emit UpdateRewardPerAddress(
                     player,
                     rightPositions[i],
-                    _roundId,
+                    roundId,
                     side,
                     0,
                     platformTokenRewardsPerPlayer
@@ -319,7 +315,8 @@ contract BlackBox is Ownable, ReentrancyGuard {
             }
             accuPlatformRewards += platformTokenRewardsPerRound;
             emit UpdateReward(
-                _roundId,
+                roundId,
+                _roundIndex,
                 totalFee,
                 platformTokenRewardsPerRound,
                 result
@@ -336,7 +333,7 @@ contract BlackBox is Ownable, ReentrancyGuard {
             );
             feeToken.safeTransfer(address(feeSharingSystem), (totalFee));
             accuFee += totalFee;
-            roundDetails[roundIndex].roundStatus = STATUS.CLOSED;
+            roundDetails[_roundIndex].roundStatus = STATUS.CLOSED;
             for (uint256 i = 0; i < rightPositions.length; i++) {
                 address player = positions[rightPositions[i]].player;
                 uint256 side = positions[rightPositions[i]].side;
@@ -352,7 +349,7 @@ contract BlackBox is Ownable, ReentrancyGuard {
                 emit UpdateRewardPerAddress(
                     player,
                     rightPositions[i],
-                    _roundId,
+                    roundId,
                     side,
                     positionAmount + gainAmount,
                     0
@@ -372,7 +369,7 @@ contract BlackBox is Ownable, ReentrancyGuard {
                 emit UpdateRewardPerAddress(
                     player,
                     leftPositions[i],
-                    _roundId,
+                    roundId,
                     side,
                     0,
                     platformTokenRewardsPerPlayer
@@ -380,7 +377,8 @@ contract BlackBox is Ownable, ReentrancyGuard {
             }
             accuPlatformRewards += platformTokenRewardsPerRound;
             emit UpdateReward(
-                _roundId,
+                roundId,
+                _roundIndex,
                 totalFee,
                 platformTokenRewardsPerRound,
                 result
@@ -390,8 +388,11 @@ contract BlackBox is Ownable, ReentrancyGuard {
         }
     }
 
-    function manualUpdateRewardByRoundId(uint256 _roundId) external onlyOwner {
-        _updateRewardByRoundId(_roundId);
+    function manualUpdateRewardByRoundIndex(uint256 _roundIndex)
+        external
+        onlyOwner
+    {
+        _updateRewardByRoundIndex(_roundIndex);
     }
 
     function manualUpdateRewards() external onlyOwner {
@@ -404,8 +405,8 @@ contract BlackBox is Ownable, ReentrancyGuard {
         uint256[]
             memory notUpdateRoundIndexes = getNotUpdatedRewardsRoundIndexes();
         for (uint256 i = 0; i < notUpdateRoundIndexes.length; i++) {
-            uint256 id = roundDetails[notUpdateRoundIndexes[i]].roundId;
-            _updateRewardByRoundId(id);
+            uint256 currentIndex = notUpdateRoundIndexes[i];
+            _updateRewardByRoundIndex(currentIndex);
         }
         _updateActiveFirstRoundIndex();
     }
@@ -427,7 +428,26 @@ contract BlackBox is Ownable, ReentrancyGuard {
         platformTokenRewardsPerRound = _rate;
     }
 
-    function withdrawAllRewards() external nonReentrant {
+    function simpleWithdraw() external nonReentrant {
+        uint256 newFeeRewards = blackBoxInfo.getFeeTokenRewardsByAddress(
+            msg.sender
+        );
+        uint256 newPlatformRewards = blackBoxInfo
+            .getPlatformTokenRewardsByAddress(msg.sender);
+        bool isSetFeeSuccess = blackBoxInfo.setFeeTokenRewards(msg.sender, 0);
+        bool isSetPlatformSuccess = blackBoxInfo.setPlatformTokenRewards(
+            msg.sender,
+            0
+        );
+        require(isSetFeeSuccess && isSetPlatformSuccess, "Failed set rewards");
+        feeToken.safeTransfer(msg.sender, newFeeRewards);
+        platformToken.safeTransfer(msg.sender, newPlatformRewards);
+        //Withdraw stakingRewards by calling FeeSharingSystem
+        feeSharingSystem.harvest(msg.sender);
+        emit Withdraw(msg.sender, newFeeRewards, newPlatformRewards);
+    }
+
+    function withdrawWithUpdates() external nonReentrant {
         //Update reward before withdraw
         _internalUpdateRewards();
         uint256 newFeeRewards = blackBoxInfo.getFeeTokenRewardsByAddress(
@@ -458,19 +478,19 @@ contract BlackBox is Ownable, ReentrancyGuard {
 
     // Get functions
 
-    function getPositionIndexesByRoundId(uint256 _roundId)
+    function getPositionIndexesByRoundIndex(uint256 _roundIndex)
         public
         view
         returns (uint256[] memory)
     {
-        uint256 positionByRoundLength = positionInRoundToCount[_roundId];
-        uint256 initPositionIndex = roundIdToInitPositionIndex[_roundId];
+        uint256 positionByRoundLength = positionInRoundToCount[_roundIndex];
+        uint256 initPositionIndex = roundIndexToInitPositionIndex[_roundIndex];
         uint256[] memory selectedPositions = new uint256[](
             positionByRoundLength
         );
         uint256 counter = 0;
         for (uint256 i = initPositionIndex; i < positions.length; i++) {
-            if (positions[i].roundId == _roundId) {
+            if (positions[i].roundIndex == _roundIndex) {
                 selectedPositions[counter] = i;
                 counter++;
             }
@@ -478,16 +498,16 @@ contract BlackBox is Ownable, ReentrancyGuard {
         return selectedPositions;
     }
 
-    function getLeftPositionIndexesByRoundId(uint256 _roundId)
+    function getLeftPositionIndexesByRoundIndex(uint256 _roundIndex)
         public
         view
         returns (uint256[] memory)
     {
-        uint256[] memory selectedPositions = getPositionIndexesByRoundId(
-            _roundId
+        uint256[] memory selectedPositions = getPositionIndexesByRoundIndex(
+            _roundIndex
         );
         uint256[] memory leftPositions = new uint256[](
-            leftPositionInRoundToCount[_roundId]
+            leftPositionInRoundToCount[_roundIndex]
         );
         uint256 counter = 0;
         uint256 result = 1;
@@ -500,16 +520,16 @@ contract BlackBox is Ownable, ReentrancyGuard {
         return leftPositions;
     }
 
-    function getRightPositionIndexesByRoundId(uint256 _roundId)
+    function getRightPositionIndexesByRoundIndex(uint256 _roundIndex)
         public
         view
         returns (uint256[] memory)
     {
-        uint256[] memory selectedPositions = getPositionIndexesByRoundId(
-            _roundId
+        uint256[] memory selectedPositions = getPositionIndexesByRoundIndex(
+            _roundIndex
         );
         uint256[] memory rightPositions = new uint256[](
-            rightPositionInRoundToCount[_roundId]
+            rightPositionInRoundToCount[_roundIndex]
         );
         uint256 counter = 0;
         uint256 result = 2;
@@ -522,14 +542,14 @@ contract BlackBox is Ownable, ReentrancyGuard {
         return rightPositions;
     }
 
-    function getTotalAmountByRoundId(uint256 _roundId)
+    function getTotalAmountByRoundIndex(uint256 _roundIndex)
         public
         view
         returns (uint256)
     {
         uint256 totalAmount = 0;
-        uint256[] memory selectedPositions = getPositionIndexesByRoundId(
-            _roundId
+        uint256[] memory selectedPositions = getPositionIndexesByRoundIndex(
+            _roundIndex
         );
         for (uint256 i = 0; i < selectedPositions.length; i++) {
             totalAmount += positions[selectedPositions[i]].amount;
@@ -537,14 +557,14 @@ contract BlackBox is Ownable, ReentrancyGuard {
         return totalAmount;
     }
 
-    function getLeftAmountByRoundId(uint256 _roundId)
+    function getLeftAmountByRoundIndex(uint256 _roundIndex)
         public
         view
         returns (uint256)
     {
         uint256 leftAmount = 0;
-        uint256[] memory selectedPositions = getLeftPositionIndexesByRoundId(
-            _roundId
+        uint256[] memory selectedPositions = getLeftPositionIndexesByRoundIndex(
+            _roundIndex
         );
         for (uint256 i = 0; i < selectedPositions.length; i++) {
             leftAmount += positions[selectedPositions[i]].amount;
@@ -552,15 +572,16 @@ contract BlackBox is Ownable, ReentrancyGuard {
         return leftAmount;
     }
 
-    function getRightAmountByRoundId(uint256 _roundId)
+    function getRightAmountByRoundIndex(uint256 _roundIndex)
         public
         view
         returns (uint256)
     {
         uint256 rightAmount = 0;
-        uint256[] memory selectedPositions = getRightPositionIndexesByRoundId(
-            _roundId
-        );
+        uint256[]
+            memory selectedPositions = getRightPositionIndexesByRoundIndex(
+                _roundIndex
+            );
         for (uint256 i = 0; i < selectedPositions.length; i++) {
             rightAmount += positions[selectedPositions[i]].amount;
         }
@@ -611,24 +632,6 @@ contract BlackBox is Ownable, ReentrancyGuard {
         for (uint256 i = firstActiveRoundIndex; i < roundDetails.length; i++) {
             if (roundDetails[i].roundStatus == STATUS.OPEN) {
                 activeRounds[counter] = i;
-                counter++;
-            }
-        }
-        return activeRounds;
-    }
-
-    function getActiveRoundIds() public view returns (uint256[] memory) {
-        uint256 lengthCounter = 0;
-        for (uint256 i = firstActiveRoundIndex; i < roundDetails.length; i++) {
-            if (roundDetails[i].roundStatus == STATUS.OPEN) {
-                lengthCounter++;
-            }
-        }
-        uint256[] memory activeRounds = new uint256[](lengthCounter);
-        uint256 counter = 0;
-        for (uint256 i = firstActiveRoundIndex; i < roundDetails.length; i++) {
-            if (roundDetails[i].roundStatus == STATUS.OPEN) {
-                activeRounds[counter] = roundDetails[i].roundId;
                 counter++;
             }
         }

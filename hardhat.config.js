@@ -15,6 +15,8 @@ module.exports = {
       url: process.env.POLYGON_URL || "",
       accounts:
         process.env.PRIVATE_KEY !== undefined ? [process.env.PRIVATE_KEY] : [],
+      usdcAddress: "0x2791Bca1f2de4661ED88A30C99A7a9449Aa84174",
+      chainId: 137,
     },
     kovan: {
       url: process.env.KOVAN_URL || "",
@@ -35,10 +37,12 @@ module.exports = {
       accounts:
         process.env.PRIVATE_KEY !== undefined ? [process.env.PRIVATE_KEY] : [],
     },
-    mumbai: {
+    polygonMumbai: {
       url: process.env.MUMBAI_URL || "",
       accounts:
         process.env.PRIVATE_KEY !== undefined ? [process.env.PRIVATE_KEY] : [],
+      usdcAddress: "0x2791Bca1f2de4661ED88A30C99A7a9449Aa84174",
+      chainId: 80001,
     },
     localhost: {
       url: "http://127.0.0.1:8545", //Do forking here 
@@ -53,6 +57,10 @@ module.exports = {
     token: "MATIC"
   },
   etherscan: {
-    apiKey: process.env.ETHERSCAN_API_KEY,
-  },
+    apiKey: {
+      mainnet: process.env.ETHERSCAN_API_KEY,
+      polygon: process.env.POLYGONSCAN_API_KEY,
+      polygonMumbai: process.env.POLYGONSCAN_API_KEY
+    }
+  }
 };
